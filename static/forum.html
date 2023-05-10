@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forum</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .post {
+            background: #f4f4f4;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            padding: 20px;
+        }
+        .post-info {
+            margin-bottom: 10px;
+        }
+        .post-info p {
+            margin: 0;
+        }
+        .post-photos {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .post-photos img {
+            border-radius: 5px;
+            width: 300px;
+            height: 300px;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .edit-post {
+            background: #333;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 5px 10px;
+            float: right;
+        }
+        .submit-btn {
+            background: #333;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 22px;
+            /*padding: 5px 10px;*/
+            float: left;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            padding-top: 100px;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            border-radius: 5px;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .full-size {
+            max-width: none;
+            max-height: none;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Post a new topic</h1>
+<form id="post-form">
+    <label for="title">Title:</label>
+    <input type="text" id="title" name="title" required>
+
+    <label for="description">Description:</label>
+    <textarea id="description" name="description" style="width: 600px; height: 30px;" required></textarea>
+    <br>
+
+    <label for="photos">Photos:</label>
+    <input type="file" id="photos" name="photos" accept="image/*" multiple>
+    <div id="photo-list">
+    </div>
+
+
+    <button class="submit-btn" type="submit" id="submit-post-btn">Submit</button>
+</form>
+
+<br>
+<h1>Posted Topics</h1>
+<ul id="post-list"></ul>
+
+<!-- The Modal -->
+<div id="myModal" class="modal">
+    <!-- Modal content -->
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2 id="modal-title"></h2>
+        <p id="modal-description"></p>
+        <div id="modal-photos" class="post-photos"></div>
+    </div>
+</div>
+
+<!-- Edit Post Modal -->
+<div id="editPostModal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Edit Post</h2>
+        <input type="hidden" id="editPostId">
+        <label for="editPostTitle">Title:</label>
+        <input type="text" id="editPostTitle" required>
+        <label for="editPostDescription">Description:</label>
+        <textarea id="editPostDescription" required></textarea>
+        <label for="editPostPhotos">Photos:</label>
+        <div id="editPostPhotos"></div>
+        <input type="file" id="editPostNewPhotos" accept="image/*" multiple>
+        <button onclick="savePostChanges()">Save Changes</button>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+
+
+<script>
+    const form = document.querySelector('#post-form');
+    const postList = document.querySelector('#post-list');
+    const photoList = document.querySelector('#photo-list');
+    const photosInput = document.querySelector('#photos');
+    const modal = document.querySelector('#myModal');
+    const closeButton = document.querySelector('.close');
+
+    photosInput.addEventListener('change', (event) => {
+        const files = event.target.files;
+        if(files.length>5){
+            alert('Limit exceeded. Up to 5 pictures can be uploaded.');
+            return;
+        }
+        // Clear the current photo list
+        photoList.innerHTML = '';
+
+        // Add each selected photo to the list
+        for (const file of files) {
+            const listItem = document.createElement('div');
+            const deleteButton = document.createElement('button');
+
+            listItem.textContent = file.name;
+            listItem.value = '';
+            deleteButton.textContent = 'Delete';
+            deleteButton.addEventListener('click', () => {
+                listItem.remove();
+            });
+
+            listItem.appendChild(deleteButton);
+            photoList.appendChild(listItem);
+        }
+    });
+
+    //convert a file to base64 string
+    function fileToBase64(file, callback) {
+        var reader = new FileReader();
+        reader.onload = function(event) {
+            var base64String = event.target.result.split(',')[1];
+            callback(base64String);
+        };
+        reader.readAsDataURL(file);
+    }
+
+
+    const submitBtn =  document.getElementById('submit-post-btn');
+    submitBtn.addEventListener('click', async () => {
+        if(!form.checkValidity()){
+            form.reportValidity();
+            return;
+        }
+        var formData = new FormData(form);
+        formData.append('token', sessionStorage.getItem('token'));
+        formData.delete('photos');
+        let photos = [];
+        var files = document.querySelector('#photos').files; // get photo files list
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            fileToBase64(file, function(base64String) {
+                photos.push({name:file.name, data:base64String})
+            });
+        }
+        formData.append('photos', JSON.stringify(photos));
+        try {
+            const response = await fetch('/api/posts', {
+                method: 'POST',
+                body: formData,
+            });
+            const result = await response.json();
+            if (response.status !== 200) {
+                alert(result.message);
+                if(response.status === 201){
+                    window.location.replace('/login');
+                }
+            }
+            else{
+                form.reset(); //
+                document.querySelector('#photo-list').innerHTML=''; //clear photo upload div
+                await displayPosts();
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    });
+
+
+    async function displayPosts() {
+        try {
+            const response = await fetch('/api/queryposts');
+            const resp = await response.json()
+            const posts = resp.rows;
+            postList.innerHTML = '';
+            for (const post of posts) {
+                // Convert timestamp to "time ago" format
+                const timeAgo = moment(post.updatetime).fromNow();
+
+                // Create post element
+                const postElement = document.createElement('li');
+                postElement.classList.add('post');
+
+                // Create post info section
+                const postInfoElement = document.createElement('div');
+                postInfoElement.classList.add('post-info');
+                postInfoElement.innerHTML = `
+        <p>${timeAgo} - ${post.username}</p>
+        <h2>${post.title}</h2>
+        <p>${post.description}</p>
+        <input type="hidden" value="${post.postid}" class="postid">
+      `;
+                postElement.appendChild(postInfoElement);
+
+                // Create post photos section
+                if (post.photos && post.photos.length > 0) {
+                    const postPhotosElement = document.createElement('div');
+                    postPhotosElement.classList.add('post-photos');
+                    for (const photo of post.photos) {
+                        const photoElement = document.createElement('img');
+                        photoElement.src = `data:image/png;base64,${photo}`;
+                        photoElement.alt = post.title;
+                        photoElement.style.width = '300px';
+                        photoElement.style.height = '300px';
+                        photoElement.style.maxWidth = '100%';
+                        photoElement.style.maxHeight = '100%';
+                        postPhotosElement.appendChild(photoElement);
+                    }
+                    postElement.appendChild(postPhotosElement);
+                }
+
+                // Create edit button
+                const editButtonElement = document.createElement('button');
+                editButtonElement.classList.add('edit-post');
+                editButtonElement.dataset.postId = post.id;
+                editButtonElement.innerText = 'Edit';
+                postInfoElement.insertBefore(editButtonElement, postInfoElement.firstChild);
+
+                // Add post element to post list
+                postList.appendChild(postElement);
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+
+    // async function editPost(event) {
+    //     const postid = event.target.parentElement.querySelector('.postid').value;
+    //     const modal = document.getElementById('editPostModal');
+    //     const closeModal = modal.querySelector('.close');
+    //     const editPostId = document.getElementById('editPostId');
+    //     const editPostTitle = document.getElementById('editPostTitle');
+    //     const editPostDescription = document.getElementById('editPostDescription');
+    //     const editPostPhotos = document.getElementById('editPostPhotos');
+    //     const editPostNewPhotos = document.getElementById('editPostNewPhotos');
+    //
+    //     // Retrieve post data and populate modal
+    //     const response = await fetch(`/api/queryposts?postid=${postid}`);
+    //     const post = await response.json();
+    //     const postData = post.rows[0];
+    //
+    //     editPostId.value = postData.postid;
+    //     editPostTitle.value = postData.title;
+    //     editPostDescription.value = postData.description;
+    //
+    //     // Clear existing photos
+    //     editPostPhotos.innerHTML = '';
+    //
+    //     // Populate modal with existing photos
+    //     if (postData.photos && postData.photos.length > 0) {
+    //         for (const photo of postData.photos) {
+    //             const photoElement = document.createElement('img');
+    //             photoElement.src = `data:image/png;base64,${photo}`;
+    //             photoElement.alt = postData.title;
+    //             photoElement.style.width = '300px';
+    //             photoElement.style.height = '300px';
+    //             photoElement.style.maxWidth = '100%';
+    //             photoElement.style.maxHeight = '100%';
+    //             photoElement.onclick = function () {
+    //                 photoElement.remove();
+    //             };
+    //             editPostPhotos.appendChild(photoElement);
+    //         }
+    //     }
+    //
+    //     // Show modal
+    //     modal.style.display = 'block';
+    //
+    //     // Close modal
+    //     closeModal.onclick = function () {
+    //         modal.style.display = 'none';
+    //     };
+    // }
+    //
+    // // Save changes
+    // async function savePostChanges() {
+    //     // TODO: Save changes to the post (update title, description, and photos)
+    //     if(!form.checkValidity()){
+    //         form.reportValidity();
+    //         return;
+    //     }
+    //     var formData = new FormData(form);
+    //     formData.append('token', sessionStorage.getItem('token'));
+    //     formData.delete('photos');
+    //     let photos = [];
+    //     var files = document.querySelector('#photos').files; // get photo files list
+    //     for (var i = 0; i < files.length; i++) {
+    //         var file = files[i];
+    //         fileToBase64(file, function(base64String) {
+    //             photos.push({name:file.name, data:base64String})
+    //             // console.log(base64String);
+    //         });
+    //     }
+    //     formData.append('photos', JSON.stringify(photos));
+    //     try {
+    //         const response = await fetch('/api/posts', {
+    //             method: 'POST',
+    //             body: formData,
+    //         });
+    //         const result = await response.json();
+    //         if (response.status !== 200) {
+    //             alert(result.message);
+    //             if(response.status === 201){
+    //                 window.location.replace('/login');
+    //             }
+    //         }
+    //         else{
+    //             form.reset(); //
+    //             document.querySelector('#photo-list').innerHTML=''; //clear photo upload div
+    //             await displayPosts();
+    //         }
+    //     } catch (error) {
+    //         console.error(error);
+    //     }
+    //     const editPostContent = editPostModal.querySelector('.modal-content');
+    //     editPostContent.innerHTML = '';
+    //     document.getElementById('editPostModal').style.display='none';
+    // }
+    //
+    //
+    // postList.addEventListener('click', (event) => {
+    //     if (event.target.classList.contains('edit-post')) {
+    //         editPost(event);
+    //     }
+    // });
+    //
+    // // Hide modal when clicking outside the modal content or on the close button
+    // window.onclick = function (event) {
+    //     if (event.target == modal || event.target == closeButton) {
+    //         modal.style.display = 'none';
+    //     }
+    // };
+
+    displayPosts();
+</script>
+</body>
+</html>
